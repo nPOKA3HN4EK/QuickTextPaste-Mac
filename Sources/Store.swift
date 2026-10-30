@@ -8,6 +8,8 @@ final class Store: ObservableObject {
     @Published var settings = Settings() { didSet { changed() } }
 
     private(set) var isFirstRun = false
+    /// Файл не прочитался: ничего не записываем, чтобы не затереть тексты пустым списком.
+    private(set) var loadError: String?
     var onChange: (() -> Void)?
 
     private var loading = false
@@ -29,11 +31,15 @@ final class Store: ObservableObject {
                 entries = lib.entries
                 settings = lib.settings
             } catch {
-                // файл повреждён: сохраняем его копию, чтобы ничего не потерять
+                // файл повреждён: сохраняем его копию и больше в него не пишем
                 let bad = dir.appendingPathComponent("texts-повреждён-\(Self.stamp()).json")
                 try? FileManager.default.copyItem(at: file, to: bad)
+                loadError = "\(error)"
                 NSLog("QuickTextPaste: не удалось прочитать texts.json: \(error)")
             }
+        } else if FileManager.default.fileExists(atPath: file.path) {
+            // файл есть, но не открылся (нет доступа и т. п.) — тоже не трогаем
+            loadError = "файл texts.json не открывается"
         } else {
             isFirstRun = true
             entries = Entry.samples
@@ -57,6 +63,7 @@ final class Store: ObservableObject {
 
     func writeNow() {
         saveWork?.cancel()
+        guard loadError == nil else { return }
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try encoded().write(to: file, options: .atomic)

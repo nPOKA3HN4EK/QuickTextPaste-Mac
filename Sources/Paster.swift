@@ -1,11 +1,12 @@
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 
 /// Вставляет текст в активное окно: кладёт в буфер и жмёт ⌘V, потом возвращает старый буфер.
 final class Paster {
     static let shared = Paster()
     private let queue = DispatchQueue(label: "qtp.paster")
-    private var busy = false
+    private(set) var busy = false
 
     static var isTrusted: Bool { AXIsProcessTrusted() }
 
@@ -20,7 +21,9 @@ final class Paster {
         }
     }
 
-    func paste(_ text: String) {
+    /// deleteFirst — сколько символов стереть перед вставкой, trailing — что сделать после,
+    /// completion — вызывается на главном потоке, когда всё готово.
+    func paste(_ text: String, deleteFirst: Int = 0, trailing: [PasteAction] = [], completion: (() -> Void)? = nil) {
         guard Self.isTrusted else {
             let alert = NSAlert()
             alert.messageText = "Нужно разрешение «Универсальный доступ»"
@@ -41,8 +44,10 @@ final class Paster {
         let pb = NSPasteboard.general
         let clipboard = pb.string(forType: .string) ?? ""
         let saved = settings.restoreClipboard ? Self.snapshot(pb) : nil
-        let actions = TextProcessor(dateFormat: settings.dateFormat, timeFormat: settings.timeFormat)
+        var actions = TextProcessor(dateFormat: settings.dateFormat, timeFormat: settings.timeFormat)
             .process(text, clipboard: clipboard)
+        if deleteFirst > 0 { actions.insert(.backspace(deleteFirst), at: 0) }
+        actions += trailing
         let delay = UInt32(max(20, settings.pasteDelayMs)) * 1000
         var pasted = false
 
@@ -70,6 +75,15 @@ final class Paster {
                 case .run(let target):
                     DispatchQueue.main.sync { Self.open(target) }
                     usleep(200_000)
+                case .typeText(let t):
+                    self.typeUnicode(t)
+                    usleep(20_000)
+                case .backspace(let n):
+                    for _ in 0..<n {
+                        self.press(UInt16(kVK_Delete), flags: [])
+                        usleep(6_000)
+                    }
+                    usleep(30_000)
                 }
             }
             // даём программе время прочитать буфер, потом возвращаем старое содержимое
@@ -77,6 +91,7 @@ final class Paster {
             DispatchQueue.main.async {
                 if pasted, let saved { Self.restore(pb, saved) }
                 self.busy = false
+                completion?()
             }
         }
     }
@@ -97,6 +112,25 @@ final class Paster {
         let up = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: false)
         down?.flags = flags
         up?.flags = flags
+        post(down, up)
+    }
+
+    private func typeUnicode(_ s: String) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        let units = Array(s.utf16)
+        let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true)
+        let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false)
+        down?.flags = []
+        up?.flags = []
+        down?.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+        up?.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+        post(down, up)
+    }
+
+    /// Помечаем свои нажатия, чтобы автотекст их не считал набором пользователя.
+    private func post(_ down: CGEvent?, _ up: CGEvent?) {
+        down?.setIntegerValueField(.eventSourceUserData, value: AutotextEngine.syntheticTag)
+        up?.setIntegerValueField(.eventSourceUserData, value: AutotextEngine.syntheticTag)
         down?.post(tap: .cghidEventTap)
         usleep(8_000)
         up?.post(tap: .cghidEventTap)

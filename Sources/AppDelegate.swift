@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -39,8 +40,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(appActivated(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
+
+        AutotextEngine.shared.isBusy = { Paster.shared.busy }
+        AutotextEngine.shared.onMatch = { [weak self] m in self?.autotextFired(m) }
         refreshHotkeys()
 
+        if let err = store.loadError {
+            let alert = NSAlert()
+            alert.messageText = "Не удалось прочитать тексты"
+            alert.informativeText = "Файл texts.json не открылся (\(err)).\n\nЧтобы ничего не потерять, программа не будет его менять, пока ты не разберёшься. Копия файла лежит рядом, в той же папке."
+            alert.addButton(withTitle: "Открыть папку")
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(store.dir) }
+        }
         if !Paster.isTrusted { Paster.promptAccessibility() }
         if store.isFirstRun { openEditor() }
     }
@@ -57,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: горячие клавиши
 
     @objc private func appActivated(_ note: Notification) {
+        AutotextEngine.shared.reset()
         refreshHotkeys()
     }
 
@@ -78,6 +92,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let failed = HotkeyCenter.shared.set(items)
         if !failed.isEmpty { NSLog("QuickTextPaste: заняты клавиши \(failed.map(\.display))") }
+        refreshAutotext(front)
+    }
+
+    // MARK: автотекст
+
+    private func refreshAutotext(_ front: NSRunningApplication?) {
+        let engine = AutotextEngine.shared
+        // в своём же окне редактора автотекст не срабатывает, иначе сокращение не ввести
+        let ours = front?.processIdentifier == NSRunningApplication.current.processIdentifier
+        engine.candidates = ours ? [] : store.entries
+            .filter { $0.enabled && !$0.trimmedAbbreviation.isEmpty && $0.matches(front) }
+            .map { AutotextCandidate(id: $0.id, abbreviation: $0.trimmedAbbreviation, mode: $0.abbreviationMode) }
+        let needed = store.settings.autotextEnabled && store.entries.contains { $0.enabled && !$0.trimmedAbbreviation.isEmpty }
+        if needed { engine.start() } else { engine.stop() }
+    }
+
+    private func autotextFired(_ m: AutotextMatch) {
+        guard let e = store.entries.first(where: { $0.id == m.id }) else { return }
+        if let defs = TextProcessor.parseMenu(e.text) {
+            // стираем сокращение и показываем меню
+            Paster.shared.paste("", deleteFirst: m.deleteCount) { [weak self] in
+                self?.popUp { menu in self?.addMenuDefs(defs, to: menu) }
+            }
+            return
+        }
+        var trailing: [PasteAction] = []
+        switch m.delimiter {
+        case "\n"?: trailing = [.key(UInt16(kVK_Return))]
+        case "\t"?: trailing = [.key(UInt16(kVK_Tab))]
+        case let d?: trailing = [.typeText(String(d))]
+        case nil: break
+        }
+        Paster.shared.paste(e.text, deleteFirst: m.deleteCount, trailing: trailing)
     }
 
     private func trigger(_ id: UUID) {
@@ -136,17 +183,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func entryItem(_ e: Entry) -> NSMenuItem {
         var title = e.title
         if let hk = e.hotkey { title += "\t" + hk.display }
-        let item = NSMenuItem(title: title, action: #selector(pickText(_:)), keyEquivalent: "")
-        item.target = self
-        item.toolTip = e.text
         if let defs = TextProcessor.parseMenu(e.text) {
+            // без своего действия: подменю macOS назначит сама. Если стереть его после, пункт станет серым
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             let sub = NSMenu()
             addMenuDefs(defs, to: sub)
             item.submenu = sub
-            item.action = nil
-        } else {
-            item.representedObject = e.text
+            return item
         }
+        let item = NSMenuItem(title: title, action: #selector(pickText(_:)), keyEquivalent: "")
+        item.target = self
+        item.toolTip = e.text
+        item.representedObject = e.text
         return item
     }
 

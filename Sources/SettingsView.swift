@@ -25,6 +25,7 @@ struct SettingsView: View {
                 LabeledContent("Меню всех текстов") {
                     HotkeyRecorder(hotkey: $store.settings.menuHotkey)
                 }
+                Toggle("Автотекст (замена сокращений при наборе)", isOn: $store.settings.autotextEnabled)
             }
 
             Section("Дата и время") {

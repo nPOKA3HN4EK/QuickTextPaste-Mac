@@ -7,6 +7,8 @@ enum PasteAction: Equatable {
     case sleep(Int)      // миллисекунды
     case key(UInt16)     // виртуальный код клавиши
     case run(String)     // открыть сайт / файл / программу
+    case typeText(String) // напечатать символы напрямую, без буфера (для разделителя автотекста)
+    case backspace(Int)  // стереть столько символов (для сокращения автотекста)
 }
 
 /// Пункт всплывающего меню (MenuName: / MenuBreak:).
@@ -77,7 +79,10 @@ struct TextProcessor {
             if let l = label {
                 var t = body.joined(separator: "\n")
                 while t.hasSuffix("\n") { t.removeLast() }
-                items.append(MenuDef(label: l.isEmpty ? (t.isEmpty ? "(пусто)" : String(t.prefix(40))) : l, text: t))
+                // пустой «MenuName:» без текста — заготовка, в меню не показываем
+                if !(l.isEmpty && t.isEmpty) {
+                    items.append(MenuDef(label: l.isEmpty ? String(t.prefix(40)) : l, text: t))
+                }
             }
             label = nil
             body = []
@@ -243,6 +248,8 @@ struct TextProcessor {
             case .sleep(let ms): return "⟨пауза \(ms) мс⟩"
             case .key(let k): return "⟨" + (sendKeys.first { $0.value == k }?.key.capitalized ?? "клавиша \(k)") + "⟩"
             case .run(let r): return "⟨открыть: \(r)⟩"
+            case .typeText(let t): return t
+            case .backspace(let n): return "⟨стереть \(n)⟩"
             }
         }.joined()
     }

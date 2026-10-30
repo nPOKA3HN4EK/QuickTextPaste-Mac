@@ -12,7 +12,7 @@ struct EditorView: View {
         guard !search.isEmpty else { return store.entries }
         return store.entries.filter {
             $0.label.localizedCaseInsensitiveContains(search) || $0.text.localizedCaseInsensitiveContains(search)
-                || $0.group.localizedCaseInsensitiveContains(search)
+                || $0.group.localizedCaseInsensitiveContains(search) || $0.abbreviation.localizedCaseInsensitiveContains(search)
         }
     }
 
@@ -101,6 +101,7 @@ struct EditorView: View {
         e.id = UUID()
         e.label = e.title + " (копия)"
         e.hotkey = nil
+        e.abbreviation = ""
         store.entries.insert(e, at: i + 1)
         selection = e.id
     }
@@ -132,6 +133,12 @@ struct EntryRow: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
+            if !entry.trimmedAbbreviation.isEmpty {
+                Text(entry.trimmedAbbreviation).font(.caption.monospaced())
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.18)))
+                    .help("Автотекст")
+            }
             if let hk = entry.hotkey {
                 Text(hk.display).font(.caption.monospaced())
                     .padding(.horizontal, 5).padding(.vertical, 2)
@@ -155,6 +162,22 @@ struct EntryDetail: View {
         return "Такая же клавиша у «\(o.title)». Сработает тот, что выше в списке (если подходит программа)."
     }
 
+    private var abbreviationWarning: String? {
+        let a = entry.trimmedAbbreviation.lowercased()
+        guard !a.isEmpty else { return nil }
+        if let o = store.entries.first(where: { $0.id != entry.id && $0.enabled && $0.trimmedAbbreviation.lowercased() == a }) {
+            return "Такое же сокращение у «\(o.title)». Сработает только один из них."
+        }
+        if a.count < 3 {
+            return "Короткое сокращение может срабатывать случайно. Лучше 3 символа и больше, например «прив» или «;адр»."
+        }
+        if entry.abbreviationMode == .immediate,
+           let o = store.entries.first(where: { $0.id != entry.id && $0.enabled && $0.trimmedAbbreviation.lowercased().hasPrefix(a) && $0.trimmedAbbreviation.count > a.count }) {
+            return "«\(o.trimmedAbbreviation)» начинается с этого сокращения, и сработать не успеет. Выбери «после пробела» или другое сокращение."
+        }
+        return nil
+    }
+
     private var runningApps: [String] {
         let names = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular && $0 != .current }
@@ -172,6 +195,17 @@ struct EntryDetail: View {
                 }
                 if let conflict {
                     Text(conflict).font(.caption).foregroundStyle(.orange)
+                }
+                TextField("Сокращение (автотекст)", text: $entry.abbreviation, prompt: Text("например, прив"))
+                if !entry.trimmedAbbreviation.isEmpty {
+                    Picker("Срабатывает", selection: $entry.abbreviationMode) {
+                        ForEach(AutotextMode.allCases) { Text($0.title).tag($0) }
+                    }
+                }
+                Text("Набери сокращение в любой программе — оно заменится этим текстом. Регистр букв не важен.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let abbreviationWarning {
+                    Text(abbreviationWarning).font(.caption).foregroundStyle(.orange)
                 }
                 LabeledContent("Только в программах") {
                     HStack {

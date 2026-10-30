@@ -60,6 +60,19 @@ struct Hotkey: Codable, Equatable, Hashable {
     }
 }
 
+/// Когда срабатывает автотекст.
+enum AutotextMode: String, Codable, CaseIterable, Identifiable {
+    case afterDelimiter   // после пробела, Enter или знака препинания
+    case immediate        // сразу после последней буквы
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .afterDelimiter: return "После пробела или знака препинания"
+        case .immediate: return "Сразу после последней буквы"
+        }
+    }
+}
+
 /// Один текст из списка.
 struct Entry: Codable, Identifiable, Equatable {
     var id = UUID()
@@ -71,6 +84,9 @@ struct Entry: Codable, Identifiable, Equatable {
     var apps = ""
     var enabled = true
     var showInMenu = true
+    /// Автотекст: набираешь это сокращение — оно заменяется текстом. Пусто = выключено.
+    var abbreviation = ""
+    var abbreviationMode = AutotextMode.afterDelimiter
 
     init(label: String = "", text: String = "", group: String = "", hotkey: Hotkey? = nil, apps: String = "") {
         self.label = label
@@ -90,7 +106,11 @@ struct Entry: Codable, Identifiable, Equatable {
         apps = try c.decodeIfPresent(String.self, forKey: .apps) ?? ""
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         showInMenu = try c.decodeIfPresent(Bool.self, forKey: .showInMenu) ?? true
+        abbreviation = try c.decodeIfPresent(String.self, forKey: .abbreviation) ?? ""
+        abbreviationMode = (try? c.decodeIfPresent(AutotextMode.self, forKey: .abbreviationMode)) ?? .afterDelimiter
     }
+
+    var trimmedAbbreviation: String { abbreviation.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var title: String {
         let l = label.trimmingCharacters(in: .whitespaces)
@@ -143,9 +163,11 @@ struct Settings: Codable, Equatable {
     var backupDaily = true
     var pasteDelayMs = 80
     var menuHotkey: Hotkey? = Hotkey(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(controlKey | optionKey))
+    var autotextEnabled = true
 
     enum CodingKeys: String, CodingKey {
         case restoreClipboard, dateFormat, timeFormat, topmost, sortMenu, backupDaily, pasteDelayMs, menuHotkey
+        case autotextEnabled
     }
 
     init() {}
@@ -161,6 +183,7 @@ struct Settings: Codable, Equatable {
         backupDaily = try c.decodeIfPresent(Bool.self, forKey: .backupDaily) ?? d.backupDaily
         pasteDelayMs = try c.decodeIfPresent(Int.self, forKey: .pasteDelayMs) ?? d.pasteDelayMs
         menuHotkey = c.contains(.menuHotkey) ? try c.decodeIfPresent(Hotkey.self, forKey: .menuHotkey) : d.menuHotkey
+        autotextEnabled = try c.decodeIfPresent(Bool.self, forKey: .autotextEnabled) ?? d.autotextEnabled
     }
 
     func encode(to encoder: Encoder) throws {
@@ -174,6 +197,7 @@ struct Settings: Codable, Equatable {
         try c.encode(pasteDelayMs, forKey: .pasteDelayMs)
         // null пишем явно, чтобы снятая клавиша не вернулась после перезапуска
         try c.encode(menuHotkey, forKey: .menuHotkey)
+        try c.encode(autotextEnabled, forKey: .autotextEnabled)
     }
 }
 

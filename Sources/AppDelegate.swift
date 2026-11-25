@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self, selector: #selector(appActivated(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
 
-        AutotextEngine.shared.isBusy = { Paster.shared.busy }
+        AutotextEngine.shared.isBusy = { Paster.shared.busy || SearchPanel.shared.isVisible }
         AutotextEngine.shared.onMatch = { [weak self] m in self?.autotextFired(m) }
         refreshHotkeys()
 
@@ -150,7 +150,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func showAllTextsMenu() {
-        popUp { menu in self.fillEntries(into: menu, includeService: false) }
+        if store.settings.searchMenu { openSearch() } else {
+            popUp { menu in self.fillEntries(into: menu, includeService: false) }
+        }
+    }
+
+    @objc private func openSearch() {
+        SearchPanel.shared.show(searchItems()) { Paster.shared.paste($0) }
+    }
+
+    /// Всё, что есть в меню, одним списком: пункты текстов-меню тоже отдельными строками.
+    private func searchItems() -> [SearchItem] {
+        var out: [SearchItem] = []
+        for e in store.entries where e.enabled && e.showInMenu {
+            if let defs = TextProcessor.parseMenu(e.text) {
+                let path = (e.group.isEmpty ? [] : [e.group]) + [e.title]
+                for d in defs where !d.isSeparator {
+                    out.append(SearchItem(title: d.label, path: path.joined(separator: " › "), text: d.text))
+                }
+            } else {
+                out.append(SearchItem(title: e.title, path: e.group, text: e.text, hotkey: e.hotkey?.display ?? ""))
+            }
+        }
+        if store.settings.sortMenu {
+            out.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        }
+        return out
     }
 
     private func addMenuDefs(_ defs: [MenuDef], to menu: NSMenu) {
@@ -228,12 +253,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             warn.target = self
             menu.addItem(warn)
         }
+        let find = NSMenuItem(title: "Найти текст…", action: #selector(openSearch), keyEquivalent: "f")
+        find.target = self
+        menu.addItem(find)
         let edit = NSMenuItem(title: "Редактор текстов…", action: #selector(openEditor), keyEquivalent: "e")
         edit.target = self
         menu.addItem(edit)
         let prefs = NSMenuItem(title: "Настройки…", action: #selector(openSettings), keyEquivalent: ",")
         prefs.target = self
         menu.addItem(prefs)
+        let donate = NSMenuItem(title: "Поддержать проект…", action: #selector(openDonate), keyEquivalent: "")
+        donate.target = self
+        menu.addItem(donate)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Выйти из QuickTextPaste", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
@@ -254,7 +285,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         show(editorWindow)
     }
 
+    @objc func openDonate() {
+        openSettings()
+        UserDefaults.standard.set("donate", forKey: "settingsTab")
+    }
+
     @objc func openSettings() {
+        UserDefaults.standard.set("settings", forKey: "settingsTab")
         if settingsWindow == nil {
             settingsWindow = makeWindow(title: "QuickTextPaste — настройки", size: NSSize(width: 560, height: 640),
                                         autosave: "SettingsWindow", view: SettingsView())

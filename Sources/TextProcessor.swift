@@ -47,10 +47,12 @@ struct CommandHelp: Identifiable {
         CommandHelp(token: "%cpy_txt_urlencode%", help: "буфер для вставки в ссылку"),
         CommandHelp(token: "%USERNAME%", help: "имя пользователя Mac"),
         CommandHelp(token: "%UserProfile%", help: "домашняя папка"),
+        CommandHelp(token: "%ask:Имя клиента%", help: "спросить перед вставкой (форма)"),
         CommandHelp(token: "%pastehtml%", help: "в самом начале: вставить текст как HTML"),
         CommandHelp(token: "run:", help: "с новой строки: открыть сайт, файл или программу", onNewLine: true),
         CommandHelp(token: "MenuName:", help: "с новой строки: пункт всплывающего меню", onNewLine: true),
         CommandHelp(token: "MenuBreak:", help: "с новой строки: разделитель в меню", onNewLine: true),
+        CommandHelp(token: "---", help: "с новой строки: разделитель вариантов (вставится случайный)", onNewLine: true),
     ]
 }
 
@@ -58,6 +60,7 @@ struct TextProcessor {
     var dateFormat = "dd.MM.yyyy"
     var timeFormat = "HH:mm"
     var now = Date()
+    var answers: [String: String] = [:]  // ответы на %ask:вопрос%
 
     static let sendKeys: [String: UInt16] = [
         "tab": 48, "enter": 36, "return": 36, "esc": 53, "escape": 53, "space": 49, "backspace": 51,
@@ -101,6 +104,58 @@ struct TextProcessor {
         }
         finish()
         return items
+    }
+
+    /// Обратно в текст с MenuName: / MenuBreak: (так список хранится в файле).
+    static func menuText(_ items: [MenuDef]) -> String {
+        items.map { $0.isSeparator ? "MenuBreak:" : "MenuName:\($0.label)\n\($0.text)" }.joined(separator: "\n\n")
+    }
+
+    // MARK: случайный вариант
+
+    /// Варианты текста, разделённые строкой «---». Если строки нет, вариант один — сам текст.
+    static func variants(_ text: String) -> [String] {
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        guard lines.contains(where: { $0.trimmingCharacters(in: .whitespaces) == "---" }) else { return [text] }
+        var out: [String] = []
+        var cur: [String] = []
+        func finish() {
+            let t = cur.joined(separator: "\n").trimmingCharacters(in: .newlines)
+            if !t.trimmingCharacters(in: .whitespaces).isEmpty { out.append(t) }
+            cur = []
+        }
+        for line in lines {
+            if line.trimmingCharacters(in: .whitespaces) == "---" { finish() } else { cur.append(line) }
+        }
+        finish()
+        return out.isEmpty ? [text] : out
+    }
+
+    private static var lastVariant: [String: Int] = [:]
+
+    /// Случайный вариант; тот же, что в прошлый раз, подряд не выпадает.
+    static func pickVariant(_ text: String) -> String {
+        let all = variants(text)
+        guard all.count > 1 else { return all[0] }
+        var i = Int.random(in: 0..<all.count)
+        if i == lastVariant[text] { i = (i + 1 + Int.random(in: 0..<(all.count - 1))) % all.count }
+        lastVariant[text] = i
+        return all[i]
+    }
+
+    // MARK: формы
+
+    /// Вопросы из %ask:...% по порядку, без повторов.
+    static func questions(_ text: String) -> [String] {
+        var out: [String] = []
+        let ns = text as NSString
+        for m in tokenRegex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let token = ns.substring(with: m.range(at: 1))
+            guard token.lowercased().hasPrefix("ask:") else { continue }
+            let q = String(token.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            if !q.isEmpty && !out.contains(q) { out.append(q) }
+        }
+        return out
     }
 
     // MARK: обработка
@@ -185,6 +240,9 @@ struct TextProcessor {
         case "copy_text_mix_lc_uc": return .text(Self.mixCase(c))
         case "copy_text_escape": return .text(Self.escape(c))
         case "cpy_txt_urlencode": return .text(Self.urlEncode(c))
+        case "ask":
+            guard let q = arg?.trimmingCharacters(in: .whitespaces), !q.isEmpty else { return nil }
+            return .text(answers[q] ?? "[\(q)]")
         default:
             if name.hasPrefix("sleep_"), let n = Int(name.dropFirst(6)), n >= 0 { return .sleep(min(n, 60_000)) }
             if name.hasPrefix("send_"), let k = Self.sendKeys[String(name.dropFirst(5))] { return .key(k) }

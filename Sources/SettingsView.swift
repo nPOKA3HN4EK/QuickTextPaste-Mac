@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var loginOn = SMAppService.mainApp.status == .enabled
     @State private var trusted = Paster.isTrusted
     @State private var message: String?
+    @AppStorage("settingsTab") private var tab = "settings"
 
     private var sample: String {
         let p = TextProcessor(dateFormat: store.settings.dateFormat, timeFormat: store.settings.timeFormat)
@@ -15,6 +16,18 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        TabView(selection: $tab) {
+            settings
+                .tabItem { Label("Настройки", systemImage: "gearshape") }
+                .tag("settings")
+            DonateView()
+                .tabItem { Label("Поддержать", systemImage: "heart") }
+                .tag("donate")
+        }
+        .frame(minWidth: 480, minHeight: 520)
+    }
+
+    private var settings: some View {
         Form {
             Section("Вставка") {
                 Toggle("Возвращать старое содержимое буфера после вставки", isOn: $store.settings.restoreClipboard)
@@ -39,6 +52,7 @@ struct SettingsView: View {
             Section("Окна и меню") {
                 Toggle("Окна поверх остальных", isOn: $store.settings.topmost)
                 Toggle("Сортировать меню по алфавиту", isOn: $store.settings.sortMenu)
+                Toggle("Меню всех текстов с поиском (по клавише меню)", isOn: $store.settings.searchMenu)
                 Toggle("Запускать при входе в систему", isOn: $loginOn)
                     .onChange(of: loginOn) { _, on in setLogin(on) }
             }
@@ -72,7 +86,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 480, minHeight: 520)
         .onAppear { trusted = Paster.isTrusted }
     }
 

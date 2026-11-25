@@ -45,5 +45,48 @@ ok("снятая клавиша меню не возвращается", back.me
 let old = try! JSONDecoder().decode(Settings.self, from: "{\"dateFormat\":\"yyyy\"}".data(using: .utf8)!)
 ok("старые настройки читаются", old.dateFormat == "yyyy" && old.restoreClipboard && old.menuHotkey != nil && old.autotextEnabled)
 
+// случайный вариант
+let vText = "Привет!\n---\nЗдравствуй!\n  ---  \nДобрый день!\n---\n"
+ok("варианты разделяются", TextProcessor.variants(vText) == ["Привет!", "Здравствуй!", "Добрый день!"])
+ok("без --- один вариант", TextProcessor.variants("a\n--\nb") == ["a\n--\nb"])
+ok("--- внутри строки не разделяет", TextProcessor.variants("a --- b").count == 1)
+var picks: [String] = []
+for _ in 0..<60 { picks.append(TextProcessor.pickVariant(vText)) }
+ok("выпадают все варианты", Set(picks).count == 3)
+ok("подряд один и тот же не выпадает", zip(picks, picks.dropFirst()).allSatisfy { $0 != $1 })
+ok("обычный текст не меняется", TextProcessor.pickVariant("Привет") == "Привет")
+
+// формы
+let fText = "Здравствуйте, %ask:Имя клиента%! Сумма %ask:Сумма% руб. %ask: Имя клиента %, до %DATE%"
+ok("вопросы без повторов", TextProcessor.questions(fText) == ["Имя клиента", "Сумма"])
+ok("нет вопросов", TextProcessor.questions("%DATE% 50%").isEmpty)
+var pf = p; pf.answers = ["Имя клиента": "Анна", "Сумма": "1 500"]
+check("ответы подставились", pf.process(fText, clipboard: ""), [.text("Здравствуйте, Анна! Сумма 1 500 руб. Анна, до 27.10.2026")])
+check("ответ с % не раскрывается", { var q = p; q.answers = ["X": "%DATE%"]; return q.process("%ask:X%", clipboard: "") }(), [.text("%DATE%")])
+check("без ответа видно вопрос", p.process("%ask:Сумма%", clipboard: ""), [.text("[Сумма]")])
+check("пустой ask не трогаем", p.process("%ask:%", clipboard: ""), [.text("%ask:%")])
+
+// поиск
+let items = [SearchItem(title: "Подпись", text: "С уважением, Иван"),
+             SearchItem(title: "Привет", path: "Быстрые ответы", text: "Здравствуйте!"),
+             SearchItem(title: "Адрес", text: "Москва, ул. Ёлочная")]
+ok("поиск по названию", SearchItem.filter(items, "подп").map(\.title) == ["Подпись"])
+ok("поиск по тексту", SearchItem.filter(items, "уважением").map(\.title) == ["Подпись"])
+ok("поиск по меню", SearchItem.filter(items, "быстрые").map(\.title) == ["Привет"])
+ok("ё = е", SearchItem.filter(items, "елочная").map(\.title) == ["Адрес"])
+ok("несколько слов", SearchItem.filter(items, "моск ул").map(\.title) == ["Адрес"])
+ok("пустой запрос — всё", SearchItem.filter(items, " ").count == 3)
+ok("начало названия первым", SearchItem.filter(items, "п").first?.title == "Подпись")
+let s2 = try! JSONDecoder().decode(Settings.self, from: "{}".data(using: .utf8)!)
+ok("поиск в меню включён по умолчанию", s2.searchMenu)
+
+// списки: туда и обратно без потерь
+let listDefs = [MenuDef(label: "Name?", text: "What's your name?"), MenuDef(label: "", text: "", isSeparator: true),
+                MenuDef(label: "Давно подписан", text: "Строка 1\nСтрока 2\n---\nВариант 2")]
+ok("список → текст → список", TextProcessor.parseMenu(TextProcessor.menuText(listDefs)) == listDefs)
+let userMenu = "MenuName:Планы утро\nDo you have any plans for morning?\n\nMenuName:Планы вечер\n\n\nMenuName:\n\n"
+let reparsed = TextProcessor.parseMenu(TextProcessor.menuText(TextProcessor.parseMenu(userMenu)!))
+ok("старое меню открывается как список", reparsed == TextProcessor.parseMenu(userMenu))
+
 print(fails == 0 ? "\nВСЕ ТЕСТЫ ПРОШЛИ" : "\nОШИБОК: \(fails)")
 exit(fails == 0 ? 0 : 1)

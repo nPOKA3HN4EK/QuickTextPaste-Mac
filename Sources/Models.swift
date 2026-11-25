@@ -164,10 +164,11 @@ struct Settings: Codable, Equatable {
     var pasteDelayMs = 80
     var menuHotkey: Hotkey? = Hotkey(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(controlKey | optionKey))
     var autotextEnabled = true
+    var searchMenu = true
 
     enum CodingKeys: String, CodingKey {
         case restoreClipboard, dateFormat, timeFormat, topmost, sortMenu, backupDaily, pasteDelayMs, menuHotkey
-        case autotextEnabled
+        case autotextEnabled, searchMenu
     }
 
     init() {}
@@ -184,6 +185,7 @@ struct Settings: Codable, Equatable {
         pasteDelayMs = try c.decodeIfPresent(Int.self, forKey: .pasteDelayMs) ?? d.pasteDelayMs
         menuHotkey = c.contains(.menuHotkey) ? try c.decodeIfPresent(Hotkey.self, forKey: .menuHotkey) : d.menuHotkey
         autotextEnabled = try c.decodeIfPresent(Bool.self, forKey: .autotextEnabled) ?? d.autotextEnabled
+        searchMenu = try c.decodeIfPresent(Bool.self, forKey: .searchMenu) ?? d.searchMenu
     }
 
     func encode(to encoder: Encoder) throws {
@@ -198,6 +200,7 @@ struct Settings: Codable, Equatable {
         // null пишем явно, чтобы снятая клавиша не вернулась после перезапуска
         try c.encode(menuHotkey, forKey: .menuHotkey)
         try c.encode(autotextEnabled, forKey: .autotextEnabled)
+        try c.encode(searchMenu, forKey: .searchMenu)
     }
 }
 

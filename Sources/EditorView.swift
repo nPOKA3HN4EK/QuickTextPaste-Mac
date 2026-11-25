@@ -152,7 +152,20 @@ struct EntryRow: View {
 struct EntryDetail: View {
     @Binding var entry: Entry
     @State private var preview: String?
+    @State private var showSource = false  // список показать как текст с MenuName:
     @ObservedObject private var store = Store.shared
+
+    private var isList: Bool { !showSource && TextProcessor.parseMenu(entry.text) != nil }
+
+    private var kind: Binding<Bool> {
+        Binding(get: { isList }, set: { list in
+            if list && TextProcessor.parseMenu(entry.text) == nil {
+                // обычный текст становится первым пунктом списка
+                entry.text = TextProcessor.menuText([MenuDef(label: "Пункт 1", text: entry.text)])
+            }
+            showSource = !list
+        })
+    }
 
     private var conflict: String? {
         guard let hk = entry.hotkey else { return nil }
@@ -225,17 +238,31 @@ struct EntryDetail: View {
                 Toggle("Показывать в меню", isOn: $entry.showInMenu)
             }
 
-            Section("Текст") {
-                TextEditor(text: $entry.text)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 200)
+            Section {
+                Picker("Вид", selection: kind) {
+                    Text("Текст").tag(false)
+                    Text("Список").tag(true)
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Section(isList ? "Пункты списка" : "Текст") {
+                if isList {
+                    ListEditor(text: $entry.text)
+                } else {
+                    TextEditor(text: $entry.text)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 200)
+                }
                 HStack {
-                    Menu("Вставить команду") {
-                        ForEach(CommandHelp.all) { c in
-                            Button("\(c.token)  —  \(c.help)") { insert(c) }
+                    if !isList {
+                        Menu("Вставить команду") {
+                            ForEach(CommandHelp.all) { c in
+                                Button("\(c.token)  —  \(c.help)") { insert(c) }
+                            }
                         }
+                        .fixedSize()
                     }
-                    .fixedSize()
                     Button("Проверить") { makePreview() }
                     Spacer()
                 }
@@ -274,8 +301,14 @@ struct EntryDetail: View {
                 $0.isSeparator ? "──────" : "• \($0.label): " + TextProcessor.describe(p.process($0.text, clipboard: clip))
             }.joined(separator: "\n")
         } else {
-            let r = TextProcessor.describe(p.process(entry.text, clipboard: clip))
-            preview = r.isEmpty ? "(ничего)" : r
+            let vs = TextProcessor.variants(entry.text)
+            let shown = vs.map { TextProcessor.describe(p.process($0, clipboard: clip)) }
+            let r = vs.count > 1
+                ? "Вставится один из \(vs.count) вариантов:\n" + shown.enumerated().map { "\($0 + 1)) \($1)" }.joined(separator: "\n")
+                : shown[0]
+            let qs = TextProcessor.questions(entry.text)
+            let form = qs.isEmpty ? "" : "\n\nПеред вставкой спросит: " + qs.joined(separator: ", ")
+            preview = (r.isEmpty ? "(ничего)" : r) + form
         }
     }
 }

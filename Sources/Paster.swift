@@ -44,14 +44,34 @@ final class Paster {
         let pb = NSPasteboard.general
         let clipboard = pb.string(forType: .string) ?? ""
         let saved = settings.restoreClipboard ? Self.snapshot(pb) : nil
-        var actions = TextProcessor(dateFormat: settings.dateFormat, timeFormat: settings.timeFormat)
-            .process(text, clipboard: clipboard)
-        if deleteFirst > 0 { actions.insert(.backspace(deleteFirst), at: 0) }
+        let chosen = TextProcessor.pickVariant(text)
+
+        // форма: спрашиваем и возвращаемся в окно, куда вставляем
+        var answers: [String: String]? = [:]
+        var refocus = false
+        let questions = TextProcessor.questions(chosen)
+        if !questions.isEmpty {
+            let previous = NSWorkspace.shared.frontmostApplication
+            answers = FormDialog.ask(questions)
+            if let previous, previous != .current { previous.activate() }
+            refocus = true
+        }
+
+        var actions: [PasteAction]
+        if let answers {
+            var p = TextProcessor(dateFormat: settings.dateFormat, timeFormat: settings.timeFormat)
+            p.answers = answers
+            actions = p.process(chosen, clipboard: clipboard)
+            if deleteFirst > 0 { actions.insert(.backspace(deleteFirst), at: 0) }
+        } else {
+            actions = [] // «Отмена»: сокращение не стираем
+        }
         actions += trailing
         let delay = UInt32(max(20, settings.pasteDelayMs)) * 1000
         var pasted = false
 
         queue.async {
+            if refocus { usleep(300_000) }
             self.waitForModifiersReleased()
             for action in actions {
                 switch action {

@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p build/tests
 
-swiftc -swift-version 5 Tests/processor/main.swift Sources/TextProcessor.swift Sources/Models.swift \
+swiftc -swift-version 5 Tests/processor/main.swift Sources/TextProcessor.swift Sources/Search.swift Sources/Models.swift \
     -o build/tests/processor
 swiftc -swift-version 5 Tests/autotext/main.swift Sources/Autotext.swift Sources/TextProcessor.swift Sources/Models.swift \
     -o build/tests/autotext
